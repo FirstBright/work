@@ -1,0 +1,13 @@
+# 환경/민감 정보
+.env
+kbid_login.json
+
+# 결과/임시 파일
+results.txt
+keywords.txt
+
+# 파이썬 캐시
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
