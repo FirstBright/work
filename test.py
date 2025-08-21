@@ -43,13 +43,13 @@ def extract_participant_section(full_text: str) -> str:
 KBID_LOGIN_URL = "https://www.kbid.co.kr/login/common_login.htm"
 KBID_HOME_URL  = "https://www.kbid.co.kr"
 COUNT_KEYWORD = "제안서"
+LOGIN_ID = os.environ.get('LOGIN_ID')
+LOGIN_PW = os.environ.get('LOGIN_PW')
+UA       = os.getenv("KBID_USER_AGENT") or \
+               "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36"
 
 def save_login_state(storage_path="kbid_login.json"):
-    load_dotenv()
-    LOGIN_ID = os.getenv("KBID_ID")
-    LOGIN_PW = os.getenv("KBID_PW")
-    UA       = os.getenv("KBID_USER_AGENT") or \
-               "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36"
+    load_dotenv()    
 
     if not LOGIN_ID or not LOGIN_PW:
         print("[ERROR] .env에 KBID_ID / KBID_PW를 설정하세요.")
@@ -198,25 +198,29 @@ def open_urls_in_tabs(urls: list[str], throttle_ms: int = 300):
 
 # ===================== CLI 진입점 =====================
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--save-login", action="store_true", help="로그인 세션 저장만 수행")
-    parser.add_argument("--crawl", action="store_true", help="검색/결과 저장 수행")
-    parser.add_argument("--open-tabs", action="store_true", help="수집한 상세 URL을 가시 브라우저 탭으로 모두 오픈")
-    parser.add_argument("--input", default="keywords.txt", help="키워드 입력 파일")
-    parser.add_argument("--output", default="results.txt", help="결과 출력 파일")
-    args = parser.parse_args()
+# def main():
+#     parser = argparse.ArgumentParser()
+#     parser.add_argument("--save-login", action="store_true", help="로그인 세션 저장만 수행")
+#     parser.add_argument("--crawl", action="store_true", help="검색/결과 저장 수행")
+#     parser.add_argument("--open-tabs", action="store_true", help="수집한 상세 URL을 가시 브라우저 탭으로 모두 오픈")
+#     parser.add_argument("--input", default="keywords.txt", help="키워드 입력 파일")
+#     parser.add_argument("--output", default="results.txt", help="결과 출력 파일")
+#     args = parser.parse_args()
 
-    if args.save_login:
-        save_login_state()
+#     if args.save_login:
+#         save_login_state()
 
-    urls = []
-    if args.crawl:
-        urls = search_and_save_results(input_file=args.input, output_file=args.output, collect_urls=args.open_tabs)
+#     urls = []
+#     if args.crawl:
+#         urls = search_and_save_results(input_file=args.input, output_file=args.output, collect_urls=args.open_tabs)
 
-    if args.open_tabs and urls:
-        # 방금 수집한 URL이 있으면 그것으로, 아니면 results.txt에서 추출
-        open_urls_in_tabs(urls)
+#     if args.open_tabs and urls:
+#         # 방금 수집한 URL이 있으면 그것으로, 아니면 results.txt에서 추출
+#         open_urls_in_tabs(urls)
 
-if __name__ == "__main__":
-    main()
+# if __name__ == "__main__":
+#     main()
+# 1) 최초 1회: 로그인 세션 저장 
+save_login_state()
+ # 2) 검색 및 결과 저장 
+search_and_save_results()
