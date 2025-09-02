@@ -2,7 +2,7 @@ from playwright.sync_api import sync_playwright
 from dotenv import load_dotenv
 import os, time, re, argparse, sys
 from pathlib import Path
-
+load_dotenv()
 # ===================== 텍스트 처리 유틸 =====================
 
 def normalize_text(s: str) -> str:
@@ -43,15 +43,15 @@ def extract_participant_section(full_text: str) -> str:
 KBID_LOGIN_URL = "https://www.kbid.co.kr/login/common_login.htm"
 KBID_HOME_URL  = "https://www.kbid.co.kr"
 COUNT_KEYWORD = "제안서"
-LOGIN_ID = os.environ.get('LOGIN_ID')
-LOGIN_PW = os.environ.get('LOGIN_PW')
+KBID_ID = os.getenv('KBID_ID')
+KBID_PW = os.getenv('KBID_PW')
 UA       = os.getenv("KBID_USER_AGENT") or \
                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36"
 
 def save_login_state(storage_path="kbid_login.json"):
-    load_dotenv()    
+       
 
-    if not LOGIN_ID or not LOGIN_PW:
+    if not KBID_ID or not KBID_PW:
         print("[ERROR] .env에 KBID_ID / KBID_PW를 설정하세요.")
         sys.exit(1)
 
@@ -73,8 +73,8 @@ def save_login_state(storage_path="kbid_login.json"):
         page = context.new_page()
         page.goto(KBID_LOGIN_URL, wait_until="load", timeout=30000)
 
-        page.fill("#MemID", LOGIN_ID)
-        page.fill("#MemPW", LOGIN_PW)
+        page.fill("#MemID", KBID_ID)
+        page.fill("#MemPW", KBID_PW)
         page.click('input[type="image"][name="images"]')
 
         page.wait_for_load_state("networkidle", timeout=15000)
@@ -92,7 +92,7 @@ def load_keywords(input_file: str) -> list[str]:
         return [re.sub(r"\(재공고\)\s*$", "", line.strip()) for line in f if line.strip()]
 
 def search_and_save_results(input_file="keywords.txt", output_file="results.txt", collect_urls=False) -> list[str]:
-    """collect_urls=True면 수집한 상세 URL 리스트를 리턴(탭 오픈용)"""
+    '''collect_urls=True면 수집한 상세 URL 리스트를 리턴(탭 오픈용)'''
     urls_collected = []
 
     with sync_playwright() as p:
@@ -167,7 +167,7 @@ def search_and_save_results(input_file="keywords.txt", output_file="results.txt"
                     except:
                         pass
 
-                out_f.write(f"{keyword} | {participant_text} | 제안서 수: {subject_number} | {detail_url}\n")
+                out_f.write(f"제안서 수: {subject_number} |{keyword} | {participant_text} |  {detail_url}\n")
                 if collect_urls and detail_url:
                     urls_collected.append(detail_url)
 
@@ -179,8 +179,50 @@ def search_and_save_results(input_file="keywords.txt", output_file="results.txt"
     print(f"[OK] 결과 저장: {output_file} / 수집 URL: {len(urls_collected)}개")
     return urls_collected
 
+def get_url_content(url: str):
+    '''주어진 URL에 접속하여 상세 내용을 텍스트로 추출하고 파일에 저장'''
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True, slow_mo=50)
+        context = browser.new_context(storage_state="kbid_login.json", locale="ko-KR")
+        page = context.new_page()
+        try:
+            page.goto(url, wait_until="networkidle", timeout=30000)
+            
+            # "이미지 공고 보기" 버튼이 있는지 확인하고 클릭
+            image_button_selector = 'a:has-text("이미지 공고 보기")'
+            image_buttons = page.query_selector_all(image_button_selector)
+            if image_buttons:
+                # 새 탭이 열리는 것을 기다림
+                with page.expect_popup() as popup_info:
+                    image_buttons[0].click()
+                page = popup_info.value
+                page.wait_for_load_state("networkidle", timeout=30000)
+
+            # 상세 내용 추출
+            detail_selector = ".gongo_detail"
+            page.wait_for_selector(detail_selector, timeout=30000)
+            page.wait_for_function(
+                f"() => document.querySelector('{detail_selector}')?.innerText?.length > 100",
+                timeout=30000
+            )
+            
+            detail_elements = page.query_selector_all(detail_selector)
+            if detail_elements:
+                full_texts = [el.inner_text() for el in detail_elements if (el.inner_text() or "").strip()]
+                full_text = "\n\n".join(full_texts)
+                with open("url_content.txt", "w", encoding="utf-8") as f:
+                    f.write(full_text)
+                print("[SUCCESS] Content saved to url_content.txt")
+            else:
+                print("[INFO] 상세 내용('.gongo_detail')을 찾을 수 없습니다.")
+
+        except Exception as e:
+            print(f"[ERROR] 내용을 가져오는 중 오류 발생: {e}")
+        finally:
+            browser.close()
+
 def open_urls_in_tabs(urls: list[str], throttle_ms: int = 300):
-    """수집된 URL을 순서대로 새 탭에 모두 띄움(가시 브라우저)"""
+    '''수집된 URL을 순서대로 새 탭에 모두 띄움(가시 브라우저)'''
     if not urls:
         print("[INFO] 열 URL이 없습니다.")
         return
@@ -198,29 +240,40 @@ def open_urls_in_tabs(urls: list[str], throttle_ms: int = 300):
 
 # ===================== CLI 진입점 =====================
 
-# def main():
-#     parser = argparse.ArgumentParser()
-#     parser.add_argument("--save-login", action="store_true", help="로그인 세션 저장만 수행")
-#     parser.add_argument("--crawl", action="store_true", help="검색/결과 저장 수행")
-#     parser.add_argument("--open-tabs", action="store_true", help="수집한 상세 URL을 가시 브라우저 탭으로 모두 오픈")
-#     parser.add_argument("--input", default="keywords.txt", help="키워드 입력 파일")
-#     parser.add_argument("--output", default="results.txt", help="결과 출력 파일")
-#     args = parser.parse_args()
+def main():
+    parser = argparse.ArgumentParser(description="KBID 크롤러")
+    parser.add_argument("--save-login", action="store_true", help="로그인 세션 저장만 수행")
+    parser.add_argument("--crawl", action="store_true", help="검색/결과 저장 수행")
+    parser.add_argument("--open-tabs", action="store_true", help="수집한 상세 URL을 가시 브라우저 탭으로 모두 오픈")
+    parser.add_argument("--get-url", type=str, help="주어진 URL의 상세 내용을 가져옵니다.")
+    parser.add_argument("--input", default="keywords.txt", help="키워드 입력 파일")
+    parser.add_argument("--output", default="results.txt", help="결과 출력 파일")
+    args = parser.parse_args()
 
-#     if args.save_login:
-#         save_login_state()
+    if args.save_login:
+        save_login_state()
+        return
 
-#     urls = []
-#     if args.crawl:
-#         urls = search_and_save_results(input_file=args.input, output_file=args.output, collect_urls=args.open_tabs)
+    if args.get_url:
+        get_url_content(args.get_url)
+        return
 
-#     if args.open_tabs and urls:
-#         # 방금 수집한 URL이 있으면 그것으로, 아니면 results.txt에서 추출
-#         open_urls_in_tabs(urls)
+    urls = []
+    if args.crawl:
+        urls = search_and_save_results(input_file=args.input, output_file=args.output, collect_urls=args.open_tabs)
 
-# if __name__ == "__main__":
-#     main()
-# 1) 최초 1회: 로그인 세션 저장 
-save_login_state()
- # 2) 검색 및 결과 저장 
-search_and_save_results()
+    if args.open_tabs:
+        if not urls: # 크롤링을 같이 실행하지 않은 경우 results.txt에서 URL 로드
+            try:
+                with open(args.output, "r", encoding="utf-8") as f:
+                    for line in f:
+                        parts = line.strip().split("|")
+                        if len(parts) == 4 and parts[3].strip().startswith("http"):
+                            urls.append(parts[3].strip())
+            except FileNotFoundError:
+                print(f"[ERROR] {args.output} 파일을 찾을 수 없습니다.")
+                return
+        open_urls_in_tabs(urls)
+
+if __name__ == "__main__":
+    main()
