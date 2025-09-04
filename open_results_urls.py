@@ -1,5 +1,10 @@
 from playwright.sync_api import sync_playwright
 import re
+import sys
+import io
+
+# Force stdout to use UTF-8 encoding
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
 def get_urls_from_results(file_path="results.txt"):
     urls = []
