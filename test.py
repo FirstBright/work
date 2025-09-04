@@ -21,6 +21,12 @@ def normalize_text(s: str) -> str:
     s = re.sub(r"[ \t]+\n", "\n", s)
     return s
 
+def has_two_or_more_lines(s: str) -> bool:
+    """정규화 후 비어있지 않은 줄이 2줄 이상인지 판단"""
+    t = normalize_text(s)
+    lines = [ln.strip() for ln in t.splitlines() if ln.strip()]
+    return len(lines) >= 2
+
 SECTION_RE = re.compile(
     r"(?:^|\n)\s*(?:제?\s*\d+\s*[-\.]?\s*)?(?:입찰)?\s*참가자격[^\n]*\n"
     r"(.*?)"
@@ -155,7 +161,11 @@ def search_and_save_results(input_file="keywords.txt", output_file="results.txt"
 
                         subject_number = len(re.findall(re.escape(COUNT_KEYWORD), full_text))
                         sec = extract_participant_section(full_text)
-                        participant_text = sec if sec else "이미지 건"
+                        if sec:
+                            participant_text = sec
+                        else:
+                            # 전체 상세 텍스트가 2줄 이상이면 '내용 있음', 아니면 '이미지 건'
+                            participant_text = "내용 있음" if has_two_or_more_lines(full_text) else "이미지 건"
                     else:
                         participant_text = "이미지 건"
 
