@@ -37,6 +37,11 @@ def extract_participant_section(full_text: str) -> str:
     body = re.sub(r"^\s*(?:\d+[-\.]\d*\.?\s*)?(?:참가자격등록|참가자격)\s*$", "", body, flags=re.M)
     body = re.sub(r"\n{3,}", "\n\n", body).strip()
     return body
+def has_two_or_more_lines(s: str) -> bool:
+    """정규화 후 비어있지 않은 줄이 2줄 이상인지 판단"""
+    t = normalize_text(s)
+    lines = [ln.strip() for ln in t.splitlines() if ln.strip()]
+    return len(lines) >= 2
 
 # ===================== 크롤러/설정 =====================
 
@@ -155,7 +160,11 @@ def search_and_save_results(input_file="keywords.txt", output_file="results.txt"
 
                         subject_number = len(re.findall(re.escape(COUNT_KEYWORD), full_text))
                         sec = extract_participant_section(full_text)
-                        participant_text = sec if sec else "이미지 건"
+                        if sec:
+                            participant_text = sec
+                        else:
+                            # 전체 상세 텍스트가 2줄 이상이면 '내용 있음', 아니면 '이미지 건'
+                            participant_text = "내용 있음" if has_two_or_more_lines(full_text) else "이미지 건"
                     else:
                         participant_text = "이미지 건"
 
