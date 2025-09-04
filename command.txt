@@ -1,0 +1,3 @@
+python test.py --save-login
+python test.py --crawl --input "keywords.txt" --output "results.txt"
+python test.py --open-tabs --output "results.txt"
