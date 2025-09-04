@@ -2,9 +2,15 @@ from playwright.sync_api import sync_playwright
 from dotenv import load_dotenv
 import os, time, re, argparse, sys
 from pathlib import Path
-load_dotenv()
-# ===================== 텍스트 처리 유틸 =====================
 
+load_dotenv()
+
+# ===================== 텍스트 처리 유틸 =====================
+def has_two_or_more_lines(s: str) -> bool:
+    """정규화 후 비어있지 않은 줄이 2줄 이상인지 판단"""
+    t = normalize_text(s)
+    lines = [ln.strip() for ln in t.splitlines() if ln.strip()]
+    return len(lines) >= 2
 def normalize_text(s: str) -> str:
     s = s.replace("\r\n", "\n").replace("\r", "\n")
     s = re.sub(r"[•·▶►\\-–—]+", " ", s)
@@ -37,25 +43,19 @@ def extract_participant_section(full_text: str) -> str:
     body = re.sub(r"^\s*(?:\d+[-\.]\d*\.?\s*)?(?:참가자격등록|참가자격)\s*$", "", body, flags=re.M)
     body = re.sub(r"\n{3,}", "\n\n", body).strip()
     return body
-def has_two_or_more_lines(s: str) -> bool:
-    """정규화 후 비어있지 않은 줄이 2줄 이상인지 판단"""
-    t = normalize_text(s)
-    lines = [ln.strip() for ln in t.splitlines() if ln.strip()]
-    return len(lines) >= 2
 
 # ===================== 크롤러/설정 =====================
 
 KBID_LOGIN_URL = "https://www.kbid.co.kr/login/common_login.htm"
 KBID_HOME_URL  = "https://www.kbid.co.kr"
-COUNT_KEYWORD = "제안서"
+COUNT_KEYWORD  = "제안서"
+
 KBID_ID = os.getenv('KBID_ID')
 KBID_PW = os.getenv('KBID_PW')
-UA       = os.getenv("KBID_USER_AGENT") or \
-               "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36"
+UA = os.getenv("KBID_USER_AGENT") or \
+     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36"
 
 def save_login_state(storage_path="kbid_login.json"):
-       
-
     if not KBID_ID or not KBID_PW:
         print("[ERROR] .env에 KBID_ID / KBID_PW를 설정하세요.")
         sys.exit(1)
@@ -97,7 +97,7 @@ def load_keywords(input_file: str) -> list[str]:
         return [re.sub(r"\(재공고\)\s*$", "", line.strip()) for line in f if line.strip()]
 
 def search_and_save_results(input_file="keywords.txt", output_file="results.txt", collect_urls=False) -> list[str]:
-    '''collect_urls=True면 수집한 상세 URL 리스트를 리턴(탭 오픈용)'''
+    """collect_urls=True면 수집한 상세 URL 리스트를 리턴(탭 오픈용)"""
     urls_collected = []
 
     with sync_playwright() as p:
@@ -165,6 +165,7 @@ def search_and_save_results(input_file="keywords.txt", output_file="results.txt"
                         else:
                             # 전체 상세 텍스트가 2줄 이상이면 '내용 있음', 아니면 '이미지 건'
                             participant_text = "내용 있음" if has_two_or_more_lines(full_text) else "이미지 건"
+                        participant_text = sec if sec else "이미지 건"
                     else:
                         participant_text = "이미지 건"
 
@@ -176,7 +177,7 @@ def search_and_save_results(input_file="keywords.txt", output_file="results.txt"
                     except:
                         pass
 
-                out_f.write(f"제안서 수: {subject_number} |{keyword} | {participant_text} |  {detail_url}\n")
+                out_f.write(f"제안서 수: {subject_number} |{keyword} | {participant_text} | {detail_url}\n")
                 if collect_urls and detail_url:
                     urls_collected.append(detail_url)
 
@@ -189,14 +190,14 @@ def search_and_save_results(input_file="keywords.txt", output_file="results.txt"
     return urls_collected
 
 def get_url_content(url: str):
-    '''주어진 URL에 접속하여 상세 내용을 텍스트로 추출하고 파일에 저장'''
+    """주어진 URL에 접속하여 상세 내용을 텍스트로 추출하고 파일에 저장"""
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True, slow_mo=50)
         context = browser.new_context(storage_state="kbid_login.json", locale="ko-KR")
         page = context.new_page()
         try:
             page.goto(url, wait_until="networkidle", timeout=30000)
-            
+
             # "이미지 공고 보기" 버튼이 있는지 확인하고 클릭
             image_button_selector = 'a:has-text("이미지 공고 보기")'
             image_buttons = page.query_selector_all(image_button_selector)
@@ -214,7 +215,7 @@ def get_url_content(url: str):
                 f"() => document.querySelector('{detail_selector}')?.innerText?.length > 100",
                 timeout=30000
             )
-            
+
             detail_elements = page.query_selector_all(detail_selector)
             if detail_elements:
                 full_texts = [el.inner_text() for el in detail_elements if (el.inner_text() or "").strip()]
@@ -231,7 +232,7 @@ def get_url_content(url: str):
             browser.close()
 
 def open_urls_in_tabs(urls: list[str], throttle_ms: int = 300):
-    '''수집된 URL을 순서대로 새 탭에 모두 띄움(가시 브라우저)'''
+    """수집된 URL을 순서대로 새 탭에 모두 띄움(가시 브라우저)"""
     if not urls:
         print("[INFO] 열 URL이 없습니다.")
         return
@@ -259,6 +260,14 @@ def main():
     parser.add_argument("--output", default="results.txt", help="결과 출력 파일")
     args = parser.parse_args()
 
+    # === 인자 없으면: 로그인 세션 저장 → 기본 크롤링 실행 ===
+    if len(sys.argv) == 1:
+        print("[INFO] 인자 없이 실행되었습니다. 로그인 세션 저장 후 기본 크롤링을 수행합니다.")
+        save_login_state()  # kbid_login.json 생성
+        search_and_save_results(input_file="keywords.txt", output_file="results.txt", collect_urls=False)
+        return
+
+    # === 이하: 명시 인자에 따른 동작 ===
     if args.save_login:
         save_login_state()
         return
@@ -269,10 +278,14 @@ def main():
 
     urls = []
     if args.crawl:
-        urls = search_and_save_results(input_file=args.input, output_file=args.output, collect_urls=args.open_tabs)
+        urls = search_and_save_results(
+            input_file=args.input,
+            output_file=args.output,
+            collect_urls=args.open_tabs
+        )
 
     if args.open_tabs:
-        if not urls: # 크롤링을 같이 실행하지 않은 경우 results.txt에서 URL 로드
+        if not urls:  # 크롤링을 같이 실행하지 않은 경우 results.txt에서 URL 로드
             try:
                 with open(args.output, "r", encoding="utf-8") as f:
                     for line in f:
