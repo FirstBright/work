@@ -97,8 +97,8 @@ def load_keywords(input_file: str) -> list[str]:
     with open(input_file, "r", encoding="utf-8") as f:
         return [re.sub(r"\(재공고\)\s*$", "", line.strip()) for line in f if line.strip()]
 
-def search_and_save_results(input_file="keywords.txt", output_file="results.txt", collect_urls=False) -> list[str]:
-    """collect_urls=True면 수집한 상세 URL 리스트를 리턴(탭 오픈용)"""
+def search_and_save_results(input_file="keywords.txt", output_file="results.txt", analysis_file="analysis_input.txt", collect_urls=False) -> list[str]:
+    """Searches for keywords, saves summary to output_file, and full content to analysis_file."""
     urls_collected = []
 
     with sync_playwright() as p:
@@ -109,7 +109,7 @@ def search_and_save_results(input_file="keywords.txt", output_file="results.txt"
 
         keywords = load_keywords(input_file)
 
-        with open(output_file, "w", encoding="utf-8") as out_f:
+        with open(output_file, "w", encoding="utf-8") as out_f, open(analysis_file, "w", encoding="utf-8") as analysis_f:
             for keyword in keywords:
                 if not keyword:
                     continue
@@ -122,6 +122,7 @@ def search_and_save_results(input_file="keywords.txt", output_file="results.txt"
                 detail_url = ""
                 subject_number = 0
                 participant_text = "이미지 건"
+                full_text = ""
 
                 try:
                     page.wait_for_selector(result_selector, timeout=10000)
@@ -131,19 +132,14 @@ def search_and_save_results(input_file="keywords.txt", output_file="results.txt"
                     time.sleep(1.0)
                     continue
 
-                with page.expect_popup() as popup_info:
-                    page.click(result_selector)
-                new_tab = popup_info.value
-                new_tab.wait_for_load_state("networkidle", timeout=30000)
-
                 try:
+                    with page.expect_popup() as popup_info:
+                        page.click(result_selector)
+                    new_tab = popup_info.value
+                    new_tab.wait_for_load_state("networkidle", timeout=30000)
                     detail_url = new_tab.url or ""
-                except:
-                    detail_url = ""
-
-                detail_selector = ".gongo_detail"
-
-                try:
+                    
+                    detail_selector = ".gongo_detail"
                     new_tab.wait_for_selector(detail_selector, timeout=60000)
                     new_tab.wait_for_function(
                         "() => document.querySelector('.gongo_detail')?.innerText?.length > 0",
@@ -151,35 +147,31 @@ def search_and_save_results(input_file="keywords.txt", output_file="results.txt"
                     )
                     detail_elements = new_tab.query_selector_all(detail_selector)
                     if detail_elements:
-                        full_texts = []
-                        for el in detail_elements:
-                            t = (el.inner_text() or "").strip()
-                            if t:
-                                full_texts.append(t)
-                            time.sleep(0.05)
+                        full_texts = [ (el.inner_text() or "").strip() for el in detail_elements if (el.inner_text() or "").strip() ]
                         full_text = "\n".join(full_texts)
-
                         subject_number = len(re.findall(re.escape(COUNT_KEYWORD), full_text))
                         sec = extract_participant_section(full_text)
-                        if sec:
-                            participant_text = sec
-                        else:
-                            # 전체 상세 텍스트가 2줄 이상이면 '내용 있음', 아니면 '이미지 건'
-                            participant_text = "내용 있음" if has_two_or_more_lines(full_text) else "이미지 건"
+                        participant_text = sec if sec else ("내용 있음" if has_two_or_more_lines(full_text) else "이미지 건")
                     else:
                         participant_text = "이미지 건"
+                        full_text = "이미지 건"
 
-                except Exception:
-                    participant_text = "이미지 건"
+                except Exception as e:
+                    print(f"Error processing {keyword}: {e}")
+                    participant_text = "오류 발생"
+                    full_text = f"Error processing {keyword}: {e}"
                 finally:
+                    out_f.write(f"제안서 수: {subject_number} |{keyword} | {participant_text} |  {detail_url}\n")
+                    analysis_f.write(f"--- URL: {detail_url} ---\n")
+                    analysis_f.write(full_text + "\n")
+                    analysis_f.write("--- END ---\n")
+                    if collect_urls and detail_url:
+                        urls_collected.append(detail_url)
                     try:
-                        new_tab.close()
-                    except:
+                        if 'new_tab' in locals() and not new_tab.is_closed():
+                           new_tab.close()
+                    except Exception:
                         pass
-
-                out_f.write(f"제안서 수: {subject_number} |{keyword} | {participant_text} |  {detail_url}\n")
-                if collect_urls and detail_url:
-                    urls_collected.append(detail_url)
 
                 page.goto(KBID_HOME_URL, wait_until="load", timeout=30000)
                 time.sleep(0.8)
@@ -188,6 +180,7 @@ def search_and_save_results(input_file="keywords.txt", output_file="results.txt"
 
     print(f"[OK] 결과 저장: {output_file} / 수집 URL: {len(urls_collected)}개")
     return urls_collected
+
 
 def open_urls_in_tabs(urls: list[str], throttle_ms: int = 300):
     """수집된 URL을 순서대로 새 탭에 모두 띄움(가시 브라우저)"""

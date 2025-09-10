@@ -10,6 +10,7 @@ def run_command(command):
         print(f"Error running command: {' '.join(command)}")
         print(f"Stderr: {result.stderr}")
         return None
+    print(result.stdout)
     return result.stdout
 
 def get_company_info(file_path="company_info.txt"):
@@ -18,6 +19,8 @@ def get_company_info(file_path="company_info.txt"):
 
 def get_results_info(file_path="results.txt"):
     results = []
+    if not os.path.exists(file_path):
+        return []
     with open(file_path, 'r', encoding='utf-8') as f:
         for line in f:
             parts = line.strip().split('|')
@@ -39,8 +42,20 @@ def get_results_info(file_path="results.txt"):
                 continue
     return results
 
-def normalize_text(s):
-    return re.sub(r'\s+', ' ', s).strip()
+def get_scraped_content(file_path="analysis_input.txt"):
+    content_map = {}
+    if not os.path.exists(file_path):
+        return content_map
+    with open(file_path, 'r', encoding='utf-8') as f:
+        content = f.read()
+        # Use a more robust regex to handle URLs with query parameters
+        announcements = re.split(r'--- URL: https?://[^s]+ ---', content)
+        urls = re.findall(r'--- URL: (https?://[^s]+) ---', content)
+        for i, announcement_content in enumerate(announcements):
+            if i > 0 and i <= len(urls):
+                clean_content = announcement_content.replace("---", "").strip()
+                content_map[urls[i-1]] = clean_content
+    return content_map
 
 def analyze_single_announcement(content, companies):
     analysis = {
@@ -48,13 +63,10 @@ def analyze_single_announcement(content, companies):
         "자격": [],
         "물품": [],
         "유형": "",
-        "제출": "",
-        "서류": []
+        "제출": ""
     }
-
-    # Extract details using regex
     analysis["자격"] = list(set(re.findall(r"(정보통신공사업|소프트웨어사업자|기계가스설비공사업|시설물유지관리업|금속구조물창호공사업|도장습식방수석공사업|건설업자|등록사업자)", content)))
-    analysis["물품"] = list(set([f'{m[0].strip()}({m[1]}) ' for m in re.findall(r"([가-힣\s]+)\((\d{{10,}})\)", content)]))
+    analysis["물품"] = list(set([f'{m[0].strip()}({m[1]})' for m in re.findall(r"([가-힣s]+?)(d{10,})", content)]))
     
     if re.search(r"협상에 의한 계약", content): analysis["유형"] = "협상에 의한 계약"
     elif re.search(r"적격심사", content): analysis["유형"] = "적격심사"
@@ -63,22 +75,23 @@ def analyze_single_announcement(content, companies):
     if re.search(r"(전자입찰|나라장터|g2b)", content, re.I): analysis["제출"] = "전자입찰"
     elif re.search(r"직접방문|방문접수", content): analysis["제출"] = "직접방문"
     
-    # Suitability analysis
     for name, profile in companies.items():
         score = 0
-        # More sophisticated matching logic can be added here
-        company_quals = " ".join(profile.get("업종", []))
-        company_items = " ".join(profile.get("직접생산확인서", []))
-
-        for qual in analysis["자격"]:
-            if qual in company_quals:
+        
+        # Check qualifications
+        for req_qual in analysis["자격"]:
+            if any(req_qual in cq for cq in profile.get("업종", [])):
                 score += 1
         
+        # Check direct production items
         for item in analysis["물품"]:
-            if item.split('(')[1] in company_items:
-                score += 2
+            item_code_match = re.search(r'((d+))', item)
+            if item_code_match:
+                item_code = item_code_match.group(1)
+                if any(item_code in ci for ci in profile.get("직접생산확인서", [])):
+                    score += 2
 
-        if score > 1:
+        if score >= 2:
             analysis["적합성"][name] = "적합"
         elif score == 1:
             analysis["적합성"][name] = "검토필요"
@@ -88,37 +101,15 @@ def analyze_single_announcement(content, companies):
     return analysis
 
 def main():
-    print("업데이트된 회사 정보로 분석을 시작합니다.")
+    print("회사 정보를 로드합니다.")
     company_info = get_company_info()
     
-    print("이전 크롤링 결과를 읽습니다.")
+    print("test.py를 실행하여 공고를 수집하고 내용을 스크랩합니다.")
+    run_command(["python", "test.py"])
+
+    print("수집된 데이터를 읽고 분석을 시작합니다.")
     results_info = get_results_info()
-    
-    print("공고 상세 내용을 스크랩합니다.")
-    scraped_output = run_command(["python", "open_results_urls.py"])
-    if not scraped_output:
-        print("스크래핑 실패. 종료합니다.")
-        return
-
-    scraped_content_map = {}
-    current_url = None
-    content_buffer = []
-    for line in scraped_output.splitlines():
-        if line.startswith("---"): # Simplified condition to catch URL lines
-            if current_url and content_buffer:
-                scraped_content_map[current_url] = '\n'.join(content_buffer)
-            
-            if "URL:" in line:
-                current_url = line.split("URL:")[-1].strip()
-            else:
-                current_url = None # Reset if it's an END line or similar
-            content_buffer = []
-        else:
-            content_buffer.append(line)
-
-    # Add the last buffered content if any
-    if current_url and content_buffer:
-        scraped_content_map[current_url] = '\n'.join(content_buffer)
+    scraped_content_map = get_scraped_content()
 
     final_output_lines = []
     for result in results_info:
@@ -135,7 +126,7 @@ def main():
                 final_output_lines.append("- 콘텐츠 없음")
             else:
                 analysis = analyze_single_announcement(content, company_info)
-                suitability_str = ", ".join([f'{k}({v})' for k, v in analysis["적합성"].items() if analysis["적합성"][k] != '부적합'])
+                suitability_str = ", ".join([f'{k}({v})' for k, v in analysis["적합성"].items() if analysis["적합성"].get(k) != '부적합'])
                 if not suitability_str: suitability_str = "적합 업체 없음"
                 
                 final_output_lines.append(f"*   **적합성:** {suitability_str}")
